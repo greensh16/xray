@@ -254,8 +254,8 @@ impl RuleSet for DaskRules {
                                     continue;
                                 }
                             }
-                            // bare from_array(...) — allow only if dask.array is imported
                         }
+                        // bare from_array(...) — allow only if dask.array is imported
                         if !has_keyword_arg(call_node, source, "chunks") {
                             let (line, col) = position(&call_node);
                             diags.push(

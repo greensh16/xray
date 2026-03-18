@@ -110,33 +110,34 @@ impl RuleSet for XarrayRules {
                         .capture_index_for_name("xr_open_call")
                         .and_then(|i| m.nodes_for_capture_index(i).next())
                     {
-                        if !has_keyword_arg(call_node, source, "chunks") {
-                            let (line, col) = position(&call_node);
-                            let fn_text = query
-                                .capture_index_for_name("fn_bare")
-                                .and_then(|i| m.nodes_for_capture_index(i).next())
-                                .or_else(|| {
-                                    query
-                                        .capture_index_for_name("fn_attr")
-                                        .and_then(|i| m.nodes_for_capture_index(i).next())
-                                })
-                                .map(|n| node_text(&n, source))
-                                .unwrap_or("open_dataset");
-
-                            diags.push(
-                                Diagnostic::new(
-                                    "XR001",
-                                    Severity::Warning,
-                                    path,
-                                    line,
-                                    col,
-                                    format!("`{fn_text}()` called without `chunks=` — data will load eagerly into RAM"),
-                                )
-                                .with_suggestion("Add `chunks='auto'` or a dict matching your storage chunk layout")
-                                .with_fix_hint(format!("{fn_text}(path, chunks=\"auto\")"))
-                                .with_url("https://docs.xarray.dev/en/stable/user-guide/dask.html"),
-                            );
+                        if has_keyword_arg(call_node, source, "chunks") {
+                            continue;
                         }
+                        let (line, col) = position(&call_node);
+                        let fn_text = query
+                            .capture_index_for_name("fn_bare")
+                            .and_then(|i| m.nodes_for_capture_index(i).next())
+                            .or_else(|| {
+                                query
+                                    .capture_index_for_name("fn_attr")
+                                    .and_then(|i| m.nodes_for_capture_index(i).next())
+                            })
+                            .map(|n| node_text(&n, source))
+                            .unwrap_or("open_dataset");
+
+                        diags.push(
+                            Diagnostic::new(
+                                "XR001",
+                                Severity::Warning,
+                                path,
+                                line,
+                                col,
+                                format!("`{fn_text}()` called without `chunks=` — data will load eagerly into RAM"),
+                            )
+                            .with_suggestion("Add `chunks='auto'` or a dict matching your storage chunk layout")
+                            .with_fix_hint(format!("{fn_text}(path, chunks=\"auto\")"))
+                            .with_url("https://docs.xarray.dev/en/stable/user-guide/dask.html"),
+                        );
                     }
                 }
 
@@ -267,27 +268,28 @@ impl RuleSet for XarrayRules {
                         .capture_index_for_name("xr_to_array_call")
                         .and_then(|i| m.nodes_for_capture_index(i).next())
                     {
-                        if !has_keyword_arg(call_node, source, "dim") {
-                            let (line, col) = position(&call_node);
-                            let method = query
-                                .capture_index_for_name("xr_to_array_attr")
-                                .and_then(|i| m.nodes_for_capture_index(i).next())
-                                .map(|n| node_text(&n, source))
-                                .unwrap_or("to_array");
-                            diags.push(
-                                Diagnostic::new(
-                                    "XR006",
-                                    Severity::Warning,
-                                    path,
-                                    line,
-                                    col,
-                                    format!("`.{method}()` called without `dim=` — creates an unnamed 'variable' dimension, making downstream indexing fragile"),
-                                )
-                                .with_suggestion("Add `dim='variable'` (or a descriptive name) to make the new dimension explicit")
-                                .with_fix_hint(format!(".{method}(dim=\"variable\")"))
-                                .with_url("https://docs.xarray.dev/en/stable/generated/xarray.Dataset.to_array.html"),
-                            );
+                        if has_keyword_arg(call_node, source, "dim") {
+                            continue;
                         }
+                        let (line, col) = position(&call_node);
+                        let method = query
+                            .capture_index_for_name("xr_to_array_attr")
+                            .and_then(|i| m.nodes_for_capture_index(i).next())
+                            .map(|n| node_text(&n, source))
+                            .unwrap_or("to_array");
+                        diags.push(
+                            Diagnostic::new(
+                                "XR006",
+                                Severity::Warning,
+                                path,
+                                line,
+                                col,
+                                format!("`.{method}()` called without `dim=` — creates an unnamed 'variable' dimension, making downstream indexing fragile"),
+                            )
+                            .with_suggestion("Add `dim='variable'` (or a descriptive name) to make the new dimension explicit")
+                            .with_fix_hint(format!(".{method}(dim=\"variable\")"))
+                            .with_url("https://docs.xarray.dev/en/stable/generated/xarray.Dataset.to_array.html"),
+                        );
                     }
                 }
 
