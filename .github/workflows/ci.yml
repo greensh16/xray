@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Test matrix ─────────────────────────────────────────────────────────────
+  test:
+    name: Test (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86-64 — primary development platform, matches NCI Gadi
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+          # Linux aarch64 — ARM64 HPC nodes, cloud HPC (AWS Graviton, etc.)
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            cross: true
+
+          # macOS arm64 — Apple Silicon development machines
+          - os: macos-14
+            target: aarch64-apple-darwin
+
+          # Windows x86-64 — Windows-based development environments
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for aarch64 Linux cross-compilation)
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Run tests (native)
+        if: "!matrix.cross"
+        run: cargo test --target ${{ matrix.target }} --all-features
+
+      - name: Run tests (cross-compiled)
+        if: matrix.cross
+        run: cross test --target ${{ matrix.target }} --all-features
+
+  # ── Lint / format gate ───────────────────────────────────────────────────────
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain with clippy and rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy -- -D warnings
