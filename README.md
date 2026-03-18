@@ -14,14 +14,8 @@ or any HPC cluster without loading a Python module.
 Download a pre-built binary from the [releases page](https://github.com/greensh16/xray/releases/latest):
 
 ```bash
-curl -L https://github.com/greensh16/xray/releases/latest/download/xray-linux-x86_64 \
+curl -L https://github.com/greensh16/xray/releases/download/v1.0.0/xray-linux-x86_64 \
   -o ~/.local/bin/xray && chmod +x ~/.local/bin/xray
-```
-
-Or install from source:
-
-```bash
-cargo install xray
 ```
 
 ---
@@ -127,37 +121,6 @@ Environment variables: `XRAY_CONFIG`, `XRAY_FORMAT`, `XRAY_MIN_SEVERITY`, `XRAY_
 
 ---
 
-## Jupyter Notebooks
-
-xray lints `.ipynb` files directly — no conversion step needed.
-
-Each code cell is linted independently. Diagnostics report the cell number and
-line within that cell:
-
-```bash
-[XR001] Warning: `open_dataset()` called without `chunks=`
-   ╭─[ analysis.ipynb:cell[2]:3:6 ]
-   │
- 3 │ ds = xr.open_dataset("era5_2020.nc")
-```
-
-Two details worth knowing:
-
-- **Magic commands** (`%matplotlib inline`, `!pip install ...`, etc.) are
-  stripped before parsing so they don't cause spurious syntax errors. Line
-  numbers within the cell are preserved.
-- **Import context is shared across cells** — `import xarray as xr` in cell 1
-  correctly gates xarray rules in cell 5.
-
-Add notebooks to your `xray.toml` to include them in every run:
-
-```toml
-[paths]
-include = ["src/**/*.py", "notebooks/**/*.ipynb"]
-```
-
----
-
 ## Output Formats
 
 | Flag | Use case |
@@ -166,41 +129,6 @@ include = ["src/**/*.py", "notebooks/**/*.ipynb"]
 | `--format json` | Versioned JSON envelope — see [JSON schema docs](https://github.com/greensh16/xray/wiki/JSON-Output-Schema) |
 | `--format sarif` | GitHub Code Scanning / any SARIF 2.1.0 consumer |
 | `--format gitlab-codequality` | GitLab CI Code Quality report |
-
----
-
-## Editor Integration
-
-`xray lsp` starts a synchronous Language Server Protocol server over stdin/stdout.
-Works with VS Code (via the xray extension), Neovim, Emacs, and any LSP client.
-
-```bash
-# VS Code: install the xray extension, then open a Python project
-# Neovim: point your LSP config at `xray lsp`
-```
-
----
-
-## CI Integration
-
-**GitHub Actions:**
-
-```yaml
-- uses: greensh16/xray-action@v1
-  with:
-    paths: src/
-    min-severity: warning
-```
-
-**pre-commit:**
-
-```yaml
-repos:
-  - repo: https://github.com/greensh16/xray
-    rev: v0.9.0
-    hooks:
-      - id: xray
-```
 
 ---
 
