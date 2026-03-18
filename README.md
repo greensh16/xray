@@ -163,7 +163,7 @@ include = ["src/**/*.py", "notebooks/**/*.ipynb"]
 | Flag | Use case |
 |------|----------|
 | `--format text` | Human-readable terminal output (default) |
-| `--format json` | Versioned JSON envelope — see [JSON schema docs](docs/json-schema.md) |
+| `--format json` | Versioned JSON envelope — see [JSON schema docs](https://github.com/greensh16/xray/wiki/JSON-Output-Schema) |
 | `--format sarif` | GitHub Code Scanning / any SARIF 2.1.0 consumer |
 | `--format gitlab-codequality` | GitLab CI Code Quality report |
 
@@ -206,13 +206,13 @@ repos:
 
 ## Documentation
 
-Full documentation lives in [`docs/`](docs/index.md):
+Full documentation lives on the [GitHub Wiki](https://github.com/greensh16/xray/wiki):
 
-- [Rule reference](docs/rules/index.md) — rationale, examples, and fix hints for all 32 rules
-- [Configuration guide](docs/configuration.md) — full `xray.toml` schema
-- [JSON output schema](docs/json-schema.md) — stable v1 field reference
-- [HPC deployment cookbook](docs/hpc-cookbook.md) — Gadi, Setonix, PBS, Slurm
-- [Case studies](docs/case-studies/) — real-world performance regressions caught by xray
+- [Rule reference](https://github.com/greensh16/xray/wiki/Rule-Reference) — rationale, examples, and fix hints for all 32 rules
+- [Configuration guide](https://github.com/greensh16/xray/wiki/Configuration) — full `xray.toml` schema
+- [JSON output schema](https://github.com/greensh16/xray/wiki/JSON-Output-Schema) — stable v1 field reference
+- [HPC deployment cookbook](https://github.com/greensh16/xray/wiki/HPC-Deployment-Cookbook) — Gadi, Setonix, PBS, Slurm
+- [Case studies](https://github.com/greensh16/xray/wiki/Case-Studies) — real-world performance regressions caught by xray
 
 ---
 
