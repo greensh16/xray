@@ -11,10 +11,10 @@ or any HPC cluster without loading a Python module.
 
 ## Installation
 
-Download a pre-built binary from the [releases page](https://github.com/xray-hpc/xray/releases/latest):
+Download a pre-built binary from the [releases page](https://github.com/greensh16/xray/releases/latest):
 
 ```bash
-curl -L https://github.com/xray-hpc/xray/releases/latest/download/xray-linux-x86_64 \
+curl -L https://github.com/greensh16/xray/releases/latest/download/xray-linux-x86_64 \
   -o ~/.local/bin/xray && chmod +x ~/.local/bin/xray
 ```
 
@@ -186,7 +186,7 @@ Works with VS Code (via the xray extension), Neovim, Emacs, and any LSP client.
 **GitHub Actions:**
 
 ```yaml
-- uses: xray-hpc/xray-action@v1
+- uses: greensh16/xray-action@v1
   with:
     paths: src/
     min-severity: warning
@@ -196,7 +196,7 @@ Works with VS Code (via the xray extension), Neovim, Emacs, and any LSP client.
 
 ```yaml
 repos:
-  - repo: https://github.com/xray-hpc/xray
+  - repo: https://github.com/greensh16/xray
     rev: v0.9.0
     hooks:
       - id: xray

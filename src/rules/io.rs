@@ -197,7 +197,7 @@ impl RuleSet for IoRules {
                                 "netCDF4 variable subscripted inside a for loop — each read may trigger a disk seek",
                             )
                             .with_suggestion("Pre-load the full array outside the loop with `data = nc_var[:]`, then index `data[i]`")
-                            .with_url("https://xray-hpc.github.io/rules/IO004"),
+                            .with_url("https://github.com/greensh16/xray/wiki/IO-Rules#io004"),
                         );
                     }
                 }

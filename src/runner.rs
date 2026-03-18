@@ -318,7 +318,7 @@ pub fn build_sarif_json(results: &RunResults) -> Result<String> {
                 "driver": {
                     "name": "xray",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/xray-hpc/xray",
+                    "informationUri": "https://github.com/greensh16/xray",
                     "rules": rules_arr,
                 }
             },

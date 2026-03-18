@@ -139,7 +139,7 @@ impl RuleSet for NumpyRules {
                                 format!("`{fn_name}()` inside a loop creates O(n²) intermediate copies"),
                             )
                             .with_suggestion("Collect arrays in a list outside the loop, then call `np.concatenate(parts)` once")
-                            .with_url("https://xray-hpc.github.io/rules/NP002"),
+                            .with_url("https://github.com/greensh16/xray/wiki/NumPy-Pandas-Rules#np002"),
                         );
                     }
                 }
@@ -202,7 +202,7 @@ impl RuleSet for NumpyRules {
                                     format!("`{fn_name}()` without `dtype=` defaults to float64 — double the memory for integer workloads"),
                                 )
                                 .with_suggestion("Add `dtype=np.float32` (or int32, int16 etc.) to match your actual data precision")
-                                .with_url("https://xray-hpc.github.io/rules/NP003"),
+                                .with_url("https://github.com/greensh16/xray/wiki/NumPy-Pandas-Rules#np003"),
                             );
                         }
                     }
@@ -242,7 +242,7 @@ impl RuleSet for NumpyRules {
                             Diagnostic::new("NP004", severity, path, line, col, message)
                                 .with_suggestion(format!("Replace with `np.{fn_name}(array)` to operate on the whole array at once"))
                                 .with_fix_hint(format!("np.{fn_name}(array)"))
-                                .with_url("https://xray-hpc.github.io/rules/NP004"),
+                                .with_url("https://github.com/greensh16/xray/wiki/NumPy-Pandas-Rules#np004"),
                         );
                     }
                 }
