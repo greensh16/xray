@@ -137,7 +137,7 @@ impl RuleSet for DaskRules {
                                 "`dask.compute()` called inside a for loop — consider batching all delayed objects and computing once",
                             )
                             .with_suggestion("Collect delayed objects in a list, then call `dask.compute(*items)` outside the loop")
-                            .with_url("https://github.com/greensh16/xray/wiki/Dask-Rules#dk002"),
+.with_url("https://github.com/greensh16/xray/wiki/Dask-Rules#DK002"),
                         );
                     }
                 }

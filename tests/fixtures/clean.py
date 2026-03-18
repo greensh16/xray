@@ -10,7 +10,7 @@ from numcodecs import Blosc
 
 # XR001 OK: chunks= provided
 ds = xr.open_dataset("era5.nc", chunks={"time": 24, "lat": 181, "lon": 360})
-ds_multi = xr.open_mfdataset("era5_*.nc", chunks={"time": 24})
+ds_multi = xr.open_mfdataset("era5_*.nc", chunks={"time": 24}, parallel=True)
 
 # XR002 OK: .to_numpy() is explicit, .data keeps dask backing
 arr_np = ds["u10"].to_numpy()

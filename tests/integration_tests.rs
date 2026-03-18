@@ -260,6 +260,10 @@ fn disable_rule_via_config() {
     config.disable.insert("XR005".to_string());
     config.disable.insert("XR006".to_string());
     config.disable.insert("XR007".to_string());
+    config.disable.insert("XR008".to_string());
+    config.disable.insert("XR009".to_string());
+    config.disable.insert("XR010".to_string());
+    config.disable.insert("XR011".to_string());
 
     let diags = rules::run_all(&parsed, path, &config);
     assert!(
