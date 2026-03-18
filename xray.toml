@@ -1,0 +1,35 @@
+#xray.toml
+# Drop this in the root of your project (or any parent directory).
+# sci-lint walks up the tree to find it, same as cargo or pyproject.toml.
+
+# ── Global rule disables ───────────────────────────────────────────────────────
+# Rule IDs to silence project-wide. Use sparingly — prefer per-file
+# suppression via inline comments (not yet implemented) for one-off cases.
+disable = [
+  # "IO002",  # Uncomment if you intentionally use netCDF4 directly
+  # "NP003",  # Uncomment if your codebase intentionally uses default float64
+]
+
+# ── xarray ────────────────────────────────────────────────────────────────────
+[xarray]
+# Promote XR002 (.values access) from warning → error.
+# Recommended for codebases where coordinate metadata loss is unacceptable
+# (e.g. ERA5 / BARRA2 analysis pipelines).
+values_access_is_error = false
+
+# ── dask ──────────────────────────────────────────────────────────────────────
+[dask]
+# Number of .compute() calls in a single file before DK003 fires.
+# Raise this for scripts that legitimately need several independent computes.
+compute_call_threshold = 3
+
+# ── numpy / pandas ────────────────────────────────────────────────────────────
+[numpy]
+# Flag DataFrame.iterrows() usage (NP001).
+# Set false only if you have a legitimate row-by-row use case.
+flag_iterrows = true
+
+# ── IO ────────────────────────────────────────────────────────────────────────
+[io]
+# Flag open_dataset / zarr.open calls missing compression hints.
+flag_missing_compression = true

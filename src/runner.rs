@@ -1,0 +1,561 @@
+use anyhow::Result;
+use ariadne::{Color, Label, Report, ReportKind, Source};
+use glob::MatchOptions;
+use rayon::prelude::*;
+use serde_json::{Value, json};
+use std::collections::HashMap;
+
+use crate::{
+    cli::{Cli, MinSeverity, OutputFormat},
+    config::Config,
+    diagnostic::{Diagnostic, FileResults, RunResults, Severity},
+    diff,
+    ignore::IgnorePatterns,
+    notebook, parser, rules,
+};
+
+/// Stable JSON schema version. Increment when the output object shape changes
+/// in a backwards-incompatible way.
+pub const JSON_SCHEMA_VERSION: &str = "1";
+
+const GLOB_OPTS: MatchOptions = MatchOptions {
+    case_sensitive: true,
+    require_literal_separator: false,
+    require_literal_leading_dot: false,
+};
+
+pub fn run(cli: &Cli, config: &Config) -> Result<RunResults> {
+    if cli.list_rules {
+        print_rule_list();
+        return Ok(RunResults::default());
+    }
+
+    // ── Config validation ─────────────────────────────────────────────────────
+    let all_ids: Vec<&str> = rules::all_meta().iter().map(|m| m.id).collect();
+    for msg in config.validate(&all_ids) {
+        eprintln!("xray: config warning: {msg}");
+    }
+
+    // ── Collect paths ─────────────────────────────────────────────────────────
+    // Priority: --diff > positional paths > config [paths].include
+    let mut paths = if let Some(ref git_ref) = cli.diff {
+        diff::changed_python_files(git_ref)?
+    } else if cli.paths.is_empty() {
+        collect_paths(&config.paths.include)?
+    } else {
+        collect_paths(&cli.paths)?
+    };
+
+    // Apply config [paths].exclude globs (not applied to --diff lists, which
+    // are already a precise set of changed files)
+    if cli.diff.is_none() && !config.paths.exclude.is_empty() {
+        let exclude_pats: Vec<glob::Pattern> = config
+            .paths
+            .exclude
+            .iter()
+            .filter_map(|p| glob::Pattern::new(p).ok())
+            .collect();
+        paths.retain(|p| {
+            let path = std::path::Path::new(p);
+            !exclude_pats
+                .iter()
+                .any(|pat| pat.matches_path_with(path, GLOB_OPTS))
+        });
+    }
+
+    // Apply .xrayignore patterns
+    let ignore = IgnorePatterns::load(".");
+    paths.retain(|p| !ignore.is_ignored(p));
+
+    // ── Lint files in parallel ────────────────────────────────────────────────
+    let file_results: Vec<_> = paths
+        .par_iter()
+        .filter_map(|path| {
+            if path.ends_with(".ipynb") {
+                lint_notebook(path, config, cli)
+            } else {
+                lint_python(path, config, cli)
+            }
+        })
+        .collect();
+
+    let results = RunResults {
+        files: file_results,
+        paths: paths.clone(),
+    };
+
+    match cli.format {
+        OutputFormat::Text => render_text(&results, &paths),
+        OutputFormat::Json => render_json(&results)?,
+        OutputFormat::Sarif => render_sarif(&results)?,
+        OutputFormat::GitlabCodequality => render_gitlab_codequality(&results)?,
+    }
+
+    if cli.stats {
+        print_stats(&results);
+    }
+
+    Ok(results)
+}
+
+// ── per-file lint helpers ─────────────────────────────────────────────────────
+
+/// Lint a single `.py` (or other Python) file.
+fn lint_python(path: &str, config: &Config, cli: &Cli) -> Option<FileResults> {
+    match parser::parse_file(path) {
+        Ok(parsed) => {
+            let mut diags = rules::run_all(&parsed, path, config);
+            apply_filters(&mut diags, config, cli);
+            Some(FileResults { diagnostics: diags })
+        }
+        Err(e) => {
+            eprintln!("xray: could not parse {path}: {e}");
+            None
+        }
+    }
+}
+
+/// Lint all code cells in a `.ipynb` notebook file.
+///
+/// All cell diagnostics are collected into a single [`FileResults`] entry so
+/// that the notebook counts as one linted "file" in the summary.  Each
+/// diagnostic's `file` field encodes the cell location (e.g.
+/// `notebook.ipynb:cell[3]`) and its `source_override` holds the cell source
+/// text for use by the ariadne renderer.
+fn lint_notebook(path: &str, config: &Config, cli: &Cli) -> Option<FileResults> {
+    let cells = match notebook::parse_notebook(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("xray: could not parse notebook {path}: {e}");
+            return None;
+        }
+    };
+
+    let mut all_diags: Vec<Diagnostic> = Vec::new();
+
+    for cell in cells {
+        let cell_source = cell.source.clone();
+        let mut diags = rules::run_all(&cell.parsed, &cell.label, config);
+
+        // Attach the cell source so `render_text` can display correct context.
+        for d in &mut diags {
+            d.source_override = Some(cell_source.clone());
+        }
+
+        apply_filters(&mut diags, config, cli);
+        all_diags.extend(diags);
+    }
+
+    Some(FileResults {
+        diagnostics: all_diags,
+    })
+}
+
+/// Apply config severity overrides, CLI disable list, and min-severity filter
+/// to a set of diagnostics.  Extracted to avoid duplicating the logic between
+/// `lint_python` and `lint_notebook`.
+fn apply_filters(diags: &mut Vec<Diagnostic>, config: &Config, cli: &Cli) {
+    for diag in diags.iter_mut() {
+        if let Some(sev_str) = config.severity_overrides.get(diag.rule_id) {
+            if let Some(sev) = parse_severity(sev_str) {
+                diag.severity = sev;
+            }
+        }
+    }
+    diags.retain(|d| !cli.disable.contains(&d.rule_id.to_string()));
+    diags.retain(|d| severity_passes(&d.severity, &cli.min_severity));
+}
+
+// ── format: text ──────────────────────────────────────────────────────────────
+
+fn render_text(results: &RunResults, _paths: &[String]) {
+    for diag in results.all_diagnostics() {
+        // For notebook cell diagnostics `diag.file` is a display label like
+        // `notebook.ipynb:cell[3]` that cannot be read from disk — use the
+        // pre-populated `source_override` instead.
+        let source_text = if let Some(ref src) = diag.source_override {
+            src.clone()
+        } else {
+            std::fs::read_to_string(&diag.file).unwrap_or_default()
+        };
+
+        let kind = match diag.severity {
+            Severity::Error => ReportKind::Error,
+            Severity::Warning => ReportKind::Warning,
+            Severity::Hint => ReportKind::Advice,
+        };
+
+        let offset = line_col_to_offset(&source_text, diag.line, diag.column);
+
+        let mut report = Report::build(kind, (diag.file.clone(), offset..offset + 1))
+            .with_code(diag.rule_id)
+            .with_message(&diag.message);
+
+        report = report.with_label(
+            Label::new((diag.file.clone(), offset..offset + 1))
+                .with_message(&diag.message)
+                .with_color(match diag.severity {
+                    Severity::Error => Color::Red,
+                    Severity::Warning => Color::Yellow,
+                    Severity::Hint => Color::Cyan,
+                }),
+        );
+
+        if let Some(ref suggestion) = diag.suggestion {
+            report = report.with_help(suggestion.clone());
+        }
+        if let Some(ref fix) = diag.fix_hint {
+            let note = match diag.url {
+                Some(url) => format!("fix: {fix}  |  docs: {url}"),
+                None => format!("fix: {fix}"),
+            };
+            report = report.with_note(note);
+        } else if let Some(url) = diag.url {
+            report = report.with_note(format!("docs: {url}"));
+        }
+
+        report
+            .finish()
+            .eprint((diag.file.clone(), Source::from(&source_text)))
+            .ok();
+    }
+
+    let total = results.total();
+    if total == 0 {
+        println!("xray: no issues found.");
+    } else {
+        eprintln!(
+            "\nxray: {} issue{} found.",
+            total,
+            if total == 1 { "" } else { "s" }
+        );
+    }
+}
+
+// ── format: json ──────────────────────────────────────────────────────────────
+
+fn render_json(results: &RunResults) -> Result<()> {
+    println!("{}", build_json(results)?);
+    Ok(())
+}
+
+/// Build the stable JSON output envelope (exposed for testing).
+///
+/// Schema:
+/// ```json
+/// {
+///   "schema_version": "1",
+///   "diagnostics": [...],
+///   "summary": { "total": N, "errors": N, "warnings": N, "hints": N }
+/// }
+/// ```
+pub fn build_json(results: &RunResults) -> Result<String> {
+    let diags: Vec<_> = results.all_diagnostics().collect();
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+    let warnings = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .count();
+    let hints = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Hint)
+        .count();
+    let envelope = json!({
+        "schema_version": JSON_SCHEMA_VERSION,
+        "diagnostics": diags,
+        "summary": {
+            "total": diags.len(),
+            "errors": errors,
+            "warnings": warnings,
+            "hints": hints,
+        }
+    });
+    Ok(serde_json::to_string_pretty(&envelope)?)
+}
+
+// ── format: sarif ─────────────────────────────────────────────────────────────
+
+/// Render SARIF 2.1.0.
+/// Printed to stdout so it can be piped or redirected to a file for upload
+/// to GitHub Code Scanning / other SARIF consumers.
+pub fn render_sarif(results: &RunResults) -> Result<()> {
+    println!("{}", build_sarif_json(results)?);
+    Ok(())
+}
+
+/// Build the SARIF JSON value (exposed for testing).
+pub fn build_sarif_json(results: &RunResults) -> Result<String> {
+    let meta = rules::all_meta();
+
+    // ── tool.driver.rules ─────────────────────────────────────────────────────
+    let rules_arr: Vec<Value> = meta
+        .iter()
+        .map(|m| {
+            let level = severity_to_sarif_level(m.severity);
+            let rule = json!({
+                "id": m.id,
+                "name": m.name,
+                "shortDescription": { "text": m.description },
+                "defaultConfiguration": { "level": level },
+            });
+            // helpUri only when the rule has a URL — we don't have one statically
+            // here, so we leave it out for now (added per-result instead)
+            rule
+        })
+        .collect();
+
+    // ── results ───────────────────────────────────────────────────────────────
+    let results_arr: Vec<Value> = results.all_diagnostics().map(build_sarif_result).collect();
+
+    let sarif = json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "xray",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "informationUri": "https://github.com/xray-hpc/xray",
+                    "rules": rules_arr,
+                }
+            },
+            "results": results_arr,
+        }]
+    });
+
+    Ok(serde_json::to_string_pretty(&sarif)?)
+}
+
+fn build_sarif_result(d: &Diagnostic) -> Value {
+    let level = severity_to_sarif_level(d.severity);
+    let mut result = json!({
+        "ruleId": d.rule_id,
+        "level": level,
+        "message": { "text": d.message },
+        "locations": [{
+            "physicalLocation": {
+                "artifactLocation": {
+                    "uri": d.file,
+                    "uriBaseId": "%SRCROOT%",
+                },
+                "region": {
+                    "startLine": d.line,
+                    "startColumn": d.column,
+                }
+            }
+        }],
+    });
+
+    // Attach a fix hint as a "fix" object if present
+    if let Some(ref hint) = d.fix_hint {
+        result["fixes"] = json!([{
+            "description": { "text": hint },
+            "artifactChanges": [],
+        }]);
+    }
+
+    // Attach docs URL as a related location / help URI
+    if let Some(url) = d.url {
+        result["helpUri"] = json!(url);
+    }
+
+    result
+}
+
+fn severity_to_sarif_level(sev: Severity) -> &'static str {
+    match sev {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Hint => "note",
+    }
+}
+
+// ── format: gitlab-codequality ────────────────────────────────────────────────
+
+/// Render GitLab Code Quality JSON.
+/// Upload as a CI artifact with `codequality` report type.
+pub fn render_gitlab_codequality(results: &RunResults) -> Result<()> {
+    println!("{}", build_gitlab_json(results)?);
+    Ok(())
+}
+
+/// Build the GitLab Code Quality JSON array (exposed for testing).
+pub fn build_gitlab_json(results: &RunResults) -> Result<String> {
+    let entries: Vec<Value> = results.all_diagnostics().map(build_gitlab_entry).collect();
+    Ok(serde_json::to_string_pretty(&entries)?)
+}
+
+fn build_gitlab_entry(d: &Diagnostic) -> Value {
+    let severity = severity_to_gitlab(d.severity);
+    // Fingerprint: deterministic hash of rule_id + file + line
+    let fingerprint = format!(
+        "{:x}",
+        simple_hash(&format!("{}{}{}", d.rule_id, d.file, d.line))
+    );
+
+    json!({
+        "description": d.message,
+        "check_name": format!("xray/{}", d.rule_id),
+        "fingerprint": fingerprint,
+        "severity": severity,
+        "location": {
+            "path": d.file,
+            "lines": { "begin": d.line }
+        }
+    })
+}
+
+fn severity_to_gitlab(sev: Severity) -> &'static str {
+    match sev {
+        Severity::Error => "critical",
+        Severity::Warning => "major",
+        Severity::Hint => "info",
+    }
+}
+
+/// A deterministic, dependency-free hash for fingerprinting diagnostics.
+/// Uses FNV-1a 64-bit, which is sufficient for a stable CI fingerprint.
+fn simple_hash(s: &str) -> u64 {
+    const FNV_OFFSET: u64 = 14_695_981_039_346_656_037;
+    const FNV_PRIME: u64 = 1_099_511_628_211;
+    s.bytes().fold(FNV_OFFSET, |acc, b| {
+        acc.wrapping_mul(FNV_PRIME) ^ (b as u64)
+    })
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+fn parse_severity(s: &str) -> Option<Severity> {
+    match s.to_lowercase().as_str() {
+        "hint" => Some(Severity::Hint),
+        "warning" => Some(Severity::Warning),
+        "error" => Some(Severity::Error),
+        _ => None,
+    }
+}
+
+fn severity_passes(sev: &Severity, min: &MinSeverity) -> bool {
+    match min {
+        MinSeverity::Hint => true,
+        MinSeverity::Warning => *sev >= Severity::Warning,
+        MinSeverity::Error => *sev >= Severity::Error,
+    }
+}
+
+fn print_rule_list() {
+    let meta = rules::all_meta();
+    println!("{:<8} {:<10} {:<35} DESCRIPTION", "ID", "SEVERITY", "NAME");
+    println!("{}", "─".repeat(100));
+    for m in meta {
+        println!(
+            "{:<8} {:<10} {:<35} {}",
+            m.id,
+            format!("{}", m.severity),
+            m.name,
+            m.description
+        );
+    }
+}
+
+/// Print per-rule and per-file summary tables (activated by --stats).
+fn print_stats(results: &RunResults) {
+    let total = results.total();
+    let file_count = results.paths.len();
+
+    eprintln!();
+    eprintln!(
+        "  xray stats ─── {} file{}, {} issue{}",
+        file_count,
+        if file_count == 1 { "" } else { "s" },
+        total,
+        if total == 1 { "" } else { "s" }
+    );
+
+    if total == 0 {
+        return;
+    }
+
+    let mut rule_counts: HashMap<&'static str, usize> = HashMap::new();
+    for diag in results.all_diagnostics() {
+        *rule_counts.entry(diag.rule_id).or_insert(0) += 1;
+    }
+    let mut rule_vec: Vec<_> = rule_counts.iter().collect();
+    rule_vec.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+
+    let meta = rules::all_meta();
+    let meta_map: HashMap<_, _> = meta.iter().map(|m| (m.id, m)).collect();
+
+    eprintln!();
+    eprintln!("  {:<8}  {:>5}  NAME", "RULE", "COUNT");
+    eprintln!("  {}  {}  {}", "─".repeat(8), "─".repeat(5), "─".repeat(35));
+    for (id, count) in &rule_vec {
+        let name = meta_map.get(*id).map(|m| m.name).unwrap_or("unknown");
+        eprintln!("  {:<8}  {:>5}  {}", id, count, name);
+    }
+
+    let files_with_issues: Vec<_> = results
+        .paths
+        .iter()
+        .zip(results.files.iter())
+        .filter(|(_, fr)| !fr.diagnostics.is_empty())
+        .collect();
+
+    if !files_with_issues.is_empty() {
+        eprintln!();
+        eprintln!("  {:<52}  {:>6}", "FILE", "ISSUES");
+        eprintln!("  {}  {}", "─".repeat(52), "─".repeat(6));
+        for (path, fr) in &files_with_issues {
+            let trimmed = path.trim_start_matches("./");
+            let display = if trimmed.len() > 52 {
+                format!("…{}", &trimmed[trimmed.len() - 51..])
+            } else {
+                trimmed.to_string()
+            };
+            eprintln!("  {:<52}  {:>6}", display, fr.diagnostics.len());
+        }
+    }
+
+    eprintln!();
+}
+
+/// Public re-export of `collect_paths` for integration testing of glob edge cases.
+pub fn collect_paths_pub(patterns: &[String]) -> Result<Vec<String>> {
+    collect_paths(patterns)
+}
+
+fn collect_paths(patterns: &[String]) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for pattern in patterns {
+        if std::path::Path::new(pattern).is_file() {
+            paths.push(pattern.clone());
+            continue;
+        }
+        for entry in glob::glob(pattern)
+            .map_err(|e| anyhow::anyhow!("invalid glob pattern `{pattern}`: {e}"))?
+            .flatten()
+        {
+            if let Some(s) = entry.to_str() {
+                paths.push(s.to_string());
+            }
+        }
+    }
+    Ok(paths)
+}
+
+fn line_col_to_offset(source: &str, line: usize, col: usize) -> usize {
+    let mut char_offset = 0usize;
+    for (i, l) in source.lines().enumerate() {
+        if i + 1 == line {
+            // col is a byte-based column from tree-sitter; convert to char count
+            let byte_col = col.saturating_sub(1).min(l.len());
+            let char_col = l[..byte_col].chars().count();
+            return char_offset + char_col;
+        }
+        // ariadne uses char-based offsets, so count chars (not bytes) per line
+        char_offset += l.chars().count() + 1;
+    }
+    char_offset
+}

@@ -1,0 +1,52 @@
+[package]
+name = "xray"
+version = "0.9.0"
+edition = "2024"
+description = "HPC scientific Python linter for xarray, dask, and NumPy workflows"
+authors = ["xray-hpc contributors <maintainers@xray-hpc.github.io>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/xray-hpc/xray"
+homepage = "https://xray-hpc.github.io"
+documentation = "https://xray-hpc.github.io/docs"
+readme = "README.md"
+keywords = ["linter", "hpc", "xarray", "dask", "numpy"]
+categories = ["development-tools", "science", "command-line-utilities"]
+exclude = [
+    "tests/fixtures/",
+    "benches/",
+    "docs/",
+    "editors/",
+    ".github/",
+]
+
+[[bin]]
+name = "xray"
+path = "src/main.rs"
+
+[lib]
+name = "xray"
+path = "src/lib.rs"
+
+[[bench]]
+name = "throughput"
+harness = false
+
+[dependencies]
+tree-sitter        = "0.26.7"
+tree-sitter-python = "0.25"
+clap               = { version = "4.6", features = ["derive", "color", "env"] }
+clap_complete      = "4.5"
+ariadne            = "0.6"
+serde              = { version = "1.0.228", features = ["derive"] }
+serde_json         = "1.0.149"
+toml               = "1.0"
+rayon              = "1.11.0"
+glob               = "0.3.3"
+streaming-iterator  = "0.1"
+anyhow             = "1.0.102"
+thiserror          = "2.0.18"
+notify             = "6.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+criterion         = { version = "0.5", features = ["html_reports"] }
