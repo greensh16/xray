@@ -32,9 +32,9 @@ jobs:
             target: aarch64-apple-darwin
             artifact: xray-macos-arm64
 
-          - os: windows-2022
-            target: x86_64-pc-windows-msvc
-            artifact: xray-windows-x86_64.exe
+          #- os: windows-2022
+          #  target: x86_64-pc-windows-msvc
+         #   artifact: xray-windows-x86_64.exe
 
     steps:
       - uses: actions/checkout@v4
