@@ -40,7 +40,7 @@ Exit codes: `0` clean · `1` diagnostics found · `2` fatal error.
 
 ## Rules
 
-32 rules across four domains. All IDs are stable from v0.9 onward.
+32 rules across four domains. All IDs are stable.
 
 ### XR — xarray
 

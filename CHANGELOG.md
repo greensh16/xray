@@ -9,8 +9,18 @@ xray uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+---
+
+## [1.0.0] — 2026-03-19
+
 ### Added
 
+- **Jupyter notebook support** — `.ipynb` files are now linted directly without
+  any conversion step. Diagnostics include the cell number and per-cell
+  line/column (e.g. `analysis.ipynb:cell[3]:2:5`). IPython magic lines
+  (`%`/`!`) are stripped before parsing so they don't cause syntax errors, while
+  preserving per-cell line numbers. Import context is accumulated across all
+  cells so `import xarray` in cell 1 correctly gates xarray rules in cell 5.
 - **XR008** — `open_mfdataset` without `parallel=True` (Warning): flags calls
   that open multi-file datasets without concurrent file-open via `dask.delayed`.
 - **XR009** — `apply_ufunc` with `dask="allowed"` (Warning): flags the silent
@@ -273,7 +283,8 @@ xray uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-[Unreleased]: https://github.com/greensh16/xray/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/greensh16/xray/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/greensh16/xray/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/greensh16/xray/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/greensh16/xray/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/greensh16/xray/compare/v0.6.0...v0.7.0
